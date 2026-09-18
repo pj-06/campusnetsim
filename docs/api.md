@@ -113,6 +113,46 @@ Error responses (all `400`):
 
 ---
 
+## GET /aps/{ap_id}/history
+
+Returns recent traffic readings for one AP, oldest first -- what the
+dashboard's trend chart is built from. Backed by a separate
+`CampusNetSim_APHistory` table, populated automatically off a DynamoDB
+Stream on `CampusNetSim_APState` (see `lambda/history_writer`) --
+event_processor itself doesn't need to know this table exists. Readings
+older than 24h are dropped automatically (DynamoDB TTL), so don't
+expect data from before that window.
+
+Request: no body. `ap_id` is a path parameter (`AP01`..`AP08`).
+
+```
+curl https://0iczavlx88.execute-api.ap-south-1.amazonaws.com/aps/AP03/history
+```
+
+Response `200`:
+
+```json
+{
+  "ap_id": "AP03",
+  "history": [
+    {
+      "ap_id": "AP03",
+      "timestamp": "2026-09-18T07:22:47.115762+00:00",
+      "building": "academic_block",
+      "connected_count": 1,
+      "capacity": 75,
+      "utilization_pct": 1.33,
+      "status": "NORMAL"
+    }
+  ]
+}
+```
+
+At most 200 points are returned per call. CORS is enabled (same as
+`GET /aps`) -- safe to call directly from browser JS.
+
+---
+
 ## Campus layout (for reference)
 
 | Building         | APs                         |
@@ -133,3 +173,35 @@ repo root with AWS credentials configured:
 ```
 python -m infrastructure.seed_dynamodb
 ```
+
+---
+
+## Deploying traffic history (one-time)
+
+`GET /aps/{ap_id}/history` doesn't exist until this is set up. From the
+repo root, with AWS credentials configured:
+
+```
+python -m infrastructure.setup_history_table
+```
+
+This creates `CampusNetSim_APHistory` (with TTL) and turns on a stream on
+`CampusNetSim_APState`, printing the stream's ARN. Then, in the AWS
+Console:
+
+1. Create a Lambda function `history_writer` from
+   `lambda/history_writer/lambda_function.py`. Add a DynamoDB trigger
+   pointing at `CampusNetSim_APState`'s stream (the ARN the script
+   printed). Its execution role needs `dynamodb:PutItem` on
+   `CampusNetSim_APHistory` plus the standard DynamoDB Streams read
+   permissions (`AWSLambdaDynamoDBExecutionRole` covers both).
+2. Create a Lambda function `history_reader` from
+   `lambda/history_reader/lambda_function.py`. Its execution role needs
+   `dynamodb:Query` on `CampusNetSim_APHistory`.
+3. In API Gateway, add a `GET /aps/{ap_id}/history` route, Lambda-proxy
+   integration to `history_reader`, with CORS enabled (same as
+   `GET /aps`). Deploy the API stage.
+
+Nothing here touches `event_processor` -- history is populated by
+reading the state table's stream, not by changing what event_processor
+writes.
