@@ -1,14 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   LineChart, Line, ReferenceLine, Cell,
 } from "recharts";
-import { Radio } from "lucide-react";
+import { Radio, RotateCcw } from "lucide-react";
 import { colors } from "./theme.js";
-import { getAPs, getServerHistory } from "./data/api.js";
+import { getAPs, getServerHistory, getMigrations, getDevices, getChatMessages, resetSimulation } from "./data/api.js";
 import APCard from "./components/APCard.jsx";
 import RecommendationsPanel from "./components/RecommendationsPanel.jsx";
 import CustomTooltip from "./components/CustomTooltip.jsx";
+import MigrationHistory from "./components/MigrationHistory.jsx";
+import RosterPanel from "./components/RosterPanel.jsx";
+import ChatPanel from "./components/ChatPanel.jsx";
 
 const POLL_INTERVAL_MS = 5000;
 // The trend chart is seeded from GET /aps/{ap_id}/history (real stored
@@ -16,6 +19,9 @@ const POLL_INTERVAL_MS = 5000;
 // cycles by appending each GET /aps snapshot as it comes in. Capped to
 // keep a bounded window in memory either way.
 const MAX_HISTORY_POINTS = 60;
+// Chat polls faster than everything else -- matches the same 2.5s cadence
+// the phone check-in page itself uses, so the dashboard feels just as live.
+const CHAT_POLL_INTERVAL_MS = 2500;
 
 export default function App() {
   const [aps, setAps] = useState([]);
@@ -23,6 +29,69 @@ export default function App() {
   const [seededFromServer, setSeededFromServer] = useState(new Set());
   const [selectedAP, setSelectedAP] = useState(null);
   const [error, setError] = useState(null);
+  const [migrations, setMigrations] = useState([]);
+  const [devices, setDevices] = useState([]);
+  const [chatMessages, setChatMessages] = useState([]);
+  const [resetting, setResetting] = useState(false);
+  const [resetMsg, setResetMsg] = useState(null);
+
+  // Shared by the poll loop below and the Reset button, so a manual reset
+  // can pull fresh (zeroed) data immediately instead of waiting for the
+  // next 5s tick.
+  const refreshAll = useCallback(async () => {
+    try {
+      const data = await getAPs();
+      setAps(data);
+      setError(null);
+      setSelectedAP((prev) => prev ?? data[0]?.ap_id ?? null);
+      setHistory((prev) => {
+        const next = { ...prev };
+        for (const ap of data) {
+          const point = {
+            time: new Date(ap.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+            utilization_pct: ap.utilization_pct,
+          };
+          const series = [...(next[ap.ap_id] ?? []), point];
+          next[ap.ap_id] = series.slice(-MAX_HISTORY_POINTS);
+        }
+        return next;
+      });
+      setMigrations(await getMigrations().catch(() => []));
+      setDevices(await getDevices().catch(() => []));
+    } catch (err) {
+      setError(err.message);
+    }
+  }, []);
+
+  // Reset clears server-side state (AP counts, Migrations, APHistory) via
+  // POST /admin/reset, but the trend chart's history is accumulated
+  // client-side (see MAX_HISTORY_POINTS above) -- without wiping local
+  // state too, old pre-reset points would keep dragging the line chart
+  // down/up even though the server now says 0%. This is also what fixes
+  // the "changed capacity/count but the graph doesn't reflect it" issue:
+  // a stale in-memory history array, not a backend problem.
+  async function handleReset() {
+    if (resetting) return;
+    const confirmed = window.confirm(
+      "Reset the simulation?\n\nThis permanently deletes all migration history and AP traffic history, and sets every access point back to 0 connected devices / 0% utilization. This cannot be undone."
+    );
+    if (!confirmed) return;
+    setResetting(true);
+    setResetMsg(null);
+    try {
+      const result = await resetSimulation();
+      setHistory({});
+      setSeededFromServer(new Set());
+      await refreshAll();
+      setResetMsg(
+        `Reset complete — ${result.aps_reset} APs cleared, ${result.migrations_deleted} migrations deleted, ${result.history_deleted} history rows deleted.`
+      );
+    } catch (err) {
+      setResetMsg(`Reset failed: ${err.message}`);
+    } finally {
+      setResetting(false);
+    }
+  }
 
   useEffect(() => {
     if (!selectedAP || seededFromServer.has(selectedAP)) return;
@@ -53,32 +122,34 @@ export default function App() {
     let cancelled = false;
 
     async function poll() {
-      try {
-        const data = await getAPs();
-        if (cancelled) return;
-        setAps(data);
-        setError(null);
-        setSelectedAP((prev) => prev ?? data[0]?.ap_id ?? null);
-        setHistory((prev) => {
-          const next = { ...prev };
-          for (const ap of data) {
-            const point = {
-              time: new Date(ap.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
-              utilization_pct: ap.utilization_pct,
-            };
-            const series = [...(next[ap.ap_id] ?? []), point];
-            next[ap.ap_id] = series.slice(-MAX_HISTORY_POINTS);
-          }
-          return next;
-        });
-      } catch (err) {
-        if (cancelled) return;
-        setError(err.message);
-      }
+      if (cancelled) return;
+      await refreshAll();
     }
 
     poll();
     const interval = setInterval(poll, POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [refreshAll]);
+
+  // Chat gets its own faster poll loop -- independent of the AP/roster poll
+  // above so a slow /aps response never delays how quickly new messages show up.
+  useEffect(() => {
+    let cancelled = false;
+
+    async function pollChat() {
+      try {
+        const msgs = await getChatMessages();
+        if (!cancelled) setChatMessages(msgs);
+      } catch {
+        // /chat unreachable this cycle -- keep showing the last known messages.
+      }
+    }
+
+    pollChat();
+    const interval = setInterval(pollChat, CHAT_POLL_INTERVAL_MS);
     return () => {
       cancelled = true;
       clearInterval(interval);
@@ -148,8 +219,41 @@ export default function App() {
               {congestedCount}
             </div>
           </div>
+          <button
+            onClick={handleReset}
+            disabled={resetting}
+            className="flex items-center gap-1.5 px-3 py-1.5"
+            style={{
+              background: colors.panel,
+              border: `1px solid ${colors.Congested}`,
+              color: colors.Congested,
+              fontSize: 12,
+              fontWeight: 600,
+              fontFamily: "'Space Grotesk', sans-serif",
+              cursor: resetting ? "not-allowed" : "pointer",
+              opacity: resetting ? 0.55 : 1,
+            }}
+            title="Wipe migration + traffic history and zero out all APs"
+          >
+            <RotateCcw size={13} strokeWidth={2.25} />
+            {resetting ? "Resetting…" : "Reset simulation"}
+          </button>
         </div>
       </div>
+
+      {resetMsg && (
+        <div
+          className="mb-4 px-3 py-2"
+          style={{
+            background: colors.panelAlt,
+            border: `1px solid ${resetMsg.startsWith("Reset failed") ? colors.Congested : colors.Normal}`,
+            color: resetMsg.startsWith("Reset failed") ? colors.Congested : colors.Normal,
+            fontSize: 12,
+          }}
+        >
+          {resetMsg}
+        </div>
+      )}
 
       {/* AP grid + recommendations */}
       <div className="grid grid-cols-3 gap-4 mb-4">
@@ -185,6 +289,17 @@ export default function App() {
         </ResponsiveContainer>
       </div>
 
+      {/* Automated load balancing history */}
+      <div className="mb-4">
+        <MigrationHistory migrations={migrations} />
+      </div>
+
+      {/* Live phone check-in roster + campus chat */}
+      <div className="grid grid-cols-2 gap-4 mb-4">
+        <RosterPanel devices={devices} />
+        <ChatPanel messages={chatMessages} />
+      </div>
+
       {/* Trend line */}
       <div className="p-4" style={{ background: colors.panel, border: `1px solid ${colors.border}` }}>
         <div className="flex items-center justify-between mb-3">
@@ -214,7 +329,7 @@ export default function App() {
       </div>
 
       <div style={{ color: colors.textFaint, fontSize: 10.5, marginTop: 14 }}>
-        Access point data is live, polled every {POLL_INTERVAL_MS / 1000}s from GET /aps. Traffic trend loads stored history from GET /aps/{"{ap_id}"}/history where available, then stays live via the same poll.
+        Access point data is live, polled every {POLL_INTERVAL_MS / 1000}s from GET /aps. Traffic trend loads stored history from GET /aps/{"{ap_id}"}/history where available, then stays live via the same poll. Connected devices poll the same cadence from GET /devices; campus chat polls every {CHAT_POLL_INTERVAL_MS / 1000}s from GET /chat.
       </div>
     </div>
   );

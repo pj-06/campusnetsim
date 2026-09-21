@@ -48,3 +48,59 @@ export async function getServerHistory(ap_id) {
     utilization_pct: point.utilization_pct,
   }));
 }
+
+export async function getMigrations() {
+  const res = await fetch(`${API_BASE}/migrations`);
+  if (!res.ok) throw new Error(`GET /migrations failed: ${res.status}`);
+  const data = await res.json();
+  return data.migrations;
+}
+
+// GET /devices -- the phone check-in roster (see CampusNetSim-DeviceRegistry).
+// Each item's status is "CONNECTED" or "DISCONNECTED"; only connected phones
+// are shown on the dashboard, newest join first.
+export async function getDevices() {
+  const res = await fetch(`${API_BASE}/devices`);
+  if (!res.ok) throw new Error(`GET /devices failed: ${res.status}`);
+  const data = await res.json();
+  return data.devices
+    .filter((d) => d.status === "CONNECTED")
+    .map((d) => ({
+      device_id: d.device_id,
+      nickname: d.nickname || "Anonymous",
+      ap_id: d.ap_id,
+      joined_at: d.joined_at,
+      last_seen: d.last_seen,
+    }))
+    .sort((a, b) => new Date(b.joined_at) - new Date(a.joined_at));
+}
+
+function formatChatTime(timestamp) {
+  return new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+// GET /chat -- the shared campus chat feed (see CampusNetSim-Chat). Messages
+// come back oldest-first; sent_at (zero-padded epoch-ms + random suffix) is
+// a stable unique+sortable key, used as the React list key.
+export async function getChatMessages() {
+  const res = await fetch(`${API_BASE}/chat`);
+  if (!res.ok) throw new Error(`GET /chat failed: ${res.status}`);
+  const data = await res.json();
+  return data.messages.map((m) => ({
+    id: m.sent_at,
+    nickname: m.nickname || "Anonymous",
+    ap_id: m.ap_id,
+    message: m.message,
+    time: formatChatTime(m.timestamp_iso),
+  }));
+}
+
+// POST /admin/reset -- CampusNetSim-AdminReset. Zeroes every AP's
+// connected_count/utilization_pct/status and permanently deletes all rows
+// from Migrations + APHistory. Irreversible -- callers must confirm with
+// the user before calling this. Returns { aps_reset, migrations_deleted, history_deleted }.
+export async function resetSimulation() {
+  const res = await fetch(`${API_BASE}/admin/reset`, { method: "POST" });
+  if (!res.ok) throw new Error(`POST /admin/reset failed: ${res.status}`);
+  return res.json();
+}
