@@ -5,12 +5,11 @@ import {
 } from "recharts";
 import { Radio, RotateCcw } from "lucide-react";
 import { colors } from "./theme.js";
-import { getAPs, getServerHistory, getMigrations, getDevices, getChatMessages, resetSimulation } from "./data/api.js";
+import { getAPs, getServerHistory, getMigrations, getDevices, resetSimulation } from "./data/api.js";
 import APCard from "./components/APCard.jsx";
 import CustomTooltip from "./components/CustomTooltip.jsx";
 import MigrationHistory from "./components/MigrationHistory.jsx";
 import RosterPanel from "./components/RosterPanel.jsx";
-import ChatPanel from "./components/ChatPanel.jsx";
 
 const POLL_INTERVAL_MS = 5000;
 // The trend chart is seeded from GET /aps/{ap_id}/history (real stored
@@ -18,9 +17,6 @@ const POLL_INTERVAL_MS = 5000;
 // cycles by appending each GET /aps snapshot as it comes in. Capped to
 // keep a bounded window in memory either way.
 const MAX_HISTORY_POINTS = 60;
-// Chat polls faster than everything else -- matches the same 2.5s cadence
-// the phone check-in page itself uses, so the dashboard feels just as live.
-const CHAT_POLL_INTERVAL_MS = 2500;
 
 export default function App() {
   const [aps, setAps] = useState([]);
@@ -30,7 +26,6 @@ export default function App() {
   const [error, setError] = useState(null);
   const [migrations, setMigrations] = useState([]);
   const [devices, setDevices] = useState([]);
-  const [chatMessages, setChatMessages] = useState([]);
   const [resetting, setResetting] = useState(false);
   const [resetMsg, setResetMsg] = useState(null);
 
@@ -132,28 +127,6 @@ export default function App() {
       clearInterval(interval);
     };
   }, [refreshAll]);
-
-  // Chat gets its own faster poll loop -- independent of the AP/roster poll
-  // above so a slow /aps response never delays how quickly new messages show up.
-  useEffect(() => {
-    let cancelled = false;
-
-    async function pollChat() {
-      try {
-        const msgs = await getChatMessages();
-        if (!cancelled) setChatMessages(msgs);
-      } catch {
-        // /chat unreachable this cycle -- keep showing the last known messages.
-      }
-    }
-
-    pollChat();
-    const interval = setInterval(pollChat, CHAT_POLL_INTERVAL_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, []);
 
   const historyData = useMemo(() => (selectedAP ? history[selectedAP] ?? [] : []), [selectedAP, history]);
 
@@ -288,10 +261,9 @@ export default function App() {
         <MigrationHistory migrations={migrations} />
       </div>
 
-      {/* Live phone check-in roster + campus chat */}
-      <div className="grid grid-cols-2 gap-4 mb-4">
+      {/* Live phone check-in roster */}
+      <div className="mb-4">
         <RosterPanel devices={devices} />
-        <ChatPanel messages={chatMessages} />
       </div>
 
       {/* Trend line */}
@@ -323,7 +295,7 @@ export default function App() {
       </div>
 
       <div style={{ color: colors.textFaint, fontSize: 10.5, marginTop: 14 }}>
-        Access point data is live, polled every {POLL_INTERVAL_MS / 1000}s from GET /aps. Traffic trend loads stored history from GET /aps/{"{ap_id}"}/history where available, then stays live via the same poll. Connected devices poll the same cadence from GET /devices; campus chat polls every {CHAT_POLL_INTERVAL_MS / 1000}s from GET /chat.
+        Access point data is live, polled every {POLL_INTERVAL_MS / 1000}s from GET /aps. Traffic trend loads stored history from GET /aps/{"{ap_id}"}/history where available, then stays live via the same poll. Connected devices poll the same cadence from GET /devices.
       </div>
     </div>
   );

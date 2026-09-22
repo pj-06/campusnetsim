@@ -72,26 +72,6 @@ export async function getDevices() {
     .sort((a, b) => new Date(b.joined_at) - new Date(a.joined_at));
 }
 
-function formatChatTime(timestamp) {
-  return new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-}
-
-// GET /chat -- the shared campus chat feed (see CampusNetSim-Chat). Messages
-// come back oldest-first; sent_at (zero-padded epoch-ms + random suffix) is
-// a stable unique+sortable key, used as the React list key.
-export async function getChatMessages() {
-  const res = await fetch(`${API_BASE}/chat`);
-  if (!res.ok) throw new Error(`GET /chat failed: ${res.status}`);
-  const data = await res.json();
-  return data.messages.map((m) => ({
-    id: m.sent_at,
-    nickname: m.nickname || "Anonymous",
-    ap_id: m.ap_id,
-    message: m.message,
-    time: formatChatTime(m.timestamp_iso),
-  }));
-}
-
 // POST /admin/reset -- CampusNetSim-AdminReset. Zeroes every AP's
 // connected_count/utilization_pct/status and permanently deletes all rows
 // from Migrations + APHistory. Irreversible -- callers must confirm with
