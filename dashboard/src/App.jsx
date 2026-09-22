@@ -7,7 +7,6 @@ import { Radio, RotateCcw } from "lucide-react";
 import { colors } from "./theme.js";
 import { getAPs, getServerHistory, getMigrations, getDevices, getChatMessages, resetSimulation } from "./data/api.js";
 import APCard from "./components/APCard.jsx";
-import RecommendationsPanel from "./components/RecommendationsPanel.jsx";
 import CustomTooltip from "./components/CustomTooltip.jsx";
 import MigrationHistory from "./components/MigrationHistory.jsx";
 import RosterPanel from "./components/RosterPanel.jsx";
@@ -255,16 +254,11 @@ export default function App() {
         </div>
       )}
 
-      {/* AP grid + recommendations */}
-      <div className="grid grid-cols-3 gap-4 mb-4">
-        <div className="col-span-2 grid grid-cols-4 gap-3">
-          {aps.map((ap) => (
-            <APCard key={ap.ap_id} ap={ap} selected={ap.ap_id === selectedAP} onSelect={setSelectedAP} />
-          ))}
-        </div>
-        <div className="col-span-1">
-          <RecommendationsPanel aps={aps} />
-        </div>
+      {/* AP grid */}
+      <div className="grid grid-cols-4 gap-3 mb-4">
+        {aps.map((ap) => (
+          <APCard key={ap.ap_id} ap={ap} selected={ap.ap_id === selectedAP} onSelect={setSelectedAP} />
+        ))}
       </div>
 
       {/* Bar chart */}

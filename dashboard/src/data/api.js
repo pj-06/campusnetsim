@@ -18,9 +18,6 @@ function normalizeAP(raw) {
     utilization_pct: raw.utilization_pct,
     status: STATUS_LABEL[raw.status] ?? raw.status,
     timestamp: raw.timestamp,
-    recommendation: raw.recommendation
-      ? `Redirect new connections to ${raw.recommendation.recommended_ap_id}`
-      : null,
   };
 }
 
