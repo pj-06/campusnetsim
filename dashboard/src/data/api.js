@@ -81,3 +81,32 @@ export async function resetSimulation() {
   if (!res.ok) throw new Error(`POST /admin/reset failed: ${res.status}`);
   return res.json();
 }
+
+
+export async function updateAPCapacity(ap_id, capacity) {
+  const res = await fetch(
+    `${API_BASE}/aps/${encodeURIComponent(ap_id)}/config`,
+    {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ capacity }),
+    }
+  );
+
+  if (!res.ok) {
+    let message = `Failed to update capacity: ${res.status}`;
+
+    try {
+      const error = await res.json();
+      message = error.error || error.message || message;
+    } catch {
+      // Keep the original error message if the response isn't JSON.
+    }
+
+    throw new Error(message);
+  }
+
+  return res.json();
+}
