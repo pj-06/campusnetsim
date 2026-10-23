@@ -26,3 +26,4 @@ dashboard/dist/
 # Build artifacts
 dashboard/*.zip
 .pytest_cache/
+reports/
