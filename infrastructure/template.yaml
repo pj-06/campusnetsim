@@ -1,0 +1,281 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >-
+  CampusNetSim - cloud-native campus Wi-Fi congestion simulation and
+  automated load balancing (AWS Lambda + API Gateway HTTP API + DynamoDB).
+
+  This template reproduces the stack that is deployed in ap-south-1. Function
+  settings (runtime, handler, memory, timeout, environment variables and
+  triggers) were exported from each deployed function's configuration in the
+  Lambda console. Table definitions match the live DynamoDB tables.
+
+  Deploy with:  sam build && sam deploy --guided
+
+Globals:
+  Function:
+    Handler: lambda_function.lambda_handler
+    Architectures:
+      - x86_64
+    MemorySize: 128
+    Timeout: 3
+    Runtime: python3.13
+
+Resources:
+  # ------------------------------------------------------------------
+  # HTTP API (CampusNetSim-API)
+  # ------------------------------------------------------------------
+  CampusNetSimApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      CorsConfiguration:
+        AllowOrigins:
+          - '*'
+        AllowMethods:
+          - GET
+          - POST
+          - PUT
+          - OPTIONS
+        AllowHeaders:
+          - '*'
+
+  # ------------------------------------------------------------------
+  # DynamoDB tables (all on-demand)
+  # ------------------------------------------------------------------
+  APStateTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: CampusNetSim_APState
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: ap_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: ap_id
+          KeyType: HASH
+      StreamSpecification:
+        StreamViewType: NEW_IMAGE
+
+  APHistoryTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: CampusNetSim_APHistory
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: ap_id
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: S
+      KeySchema:
+        - AttributeName: ap_id
+          KeyType: HASH
+        - AttributeName: timestamp
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: expires_at
+        Enabled: true
+
+  DevicesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: CampusNetSim_Devices
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: device_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: device_id
+          KeyType: HASH
+
+  MigrationsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: CampusNetSim_Migrations
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: timestamp
+          KeyType: RANGE
+
+  # ------------------------------------------------------------------
+  # API-triggered functions
+  # ------------------------------------------------------------------
+  EventProcessorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: CampusNetSim-EventProcessor
+      CodeUri: ../backend/lambdas/event_processor/
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref APStateTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref APStateTable
+      Events:
+        Events:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref CampusNetSimApi
+            Method: ANY
+            Path: /events
+
+  DeviceRegistryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: CampusNetSim-DeviceRegistry
+      CodeUri: ../backend/lambdas/device_registry/
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DevicesTable
+      Events:
+        Devices:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref CampusNetSimApi
+            Method: ANY
+            Path: /devices
+
+  StatusReaderFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: CampusNetSim-StatusReader
+      CodeUri: ../backend/lambdas/status_reader/
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref APStateTable
+      Events:
+        Aps:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref CampusNetSimApi
+            Method: ANY
+            Path: /aps
+
+  UpdateAPConfigFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: UpdateAPConfig
+      Runtime: python3.14
+      CodeUri: ../backend/lambdas/update_ap_config/
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref APStateTable
+      Events:
+        ApConfig:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref CampusNetSimApi
+            Method: ANY
+            Path: /aps/{ap_id}/config
+
+  HistoryReaderFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: CampusNetSim-HistoryReader
+      CodeUri: ../backend/lambdas/history_reader/
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref APHistoryTable
+      Events:
+        History:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref CampusNetSimApi
+            Method: ANY
+            Path: /aps/{ap_id}/history
+
+  MigrationReaderFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: CampusNetSim-MigrationReader
+      CodeUri: ../backend/lambdas/migration_reader/
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref MigrationsTable
+      Events:
+        Migrations:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref CampusNetSimApi
+            Method: ANY
+            Path: /migrations
+
+  AdminResetFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: CampusNetSim-AdminReset
+      CodeUri: ../backend/lambdas/admin_reset/
+      Timeout: 40
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref APStateTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref APHistoryTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DevicesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MigrationsTable
+      Events:
+        Reset:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref CampusNetSimApi
+            Method: ANY
+            Path: /admin/reset
+
+  # ------------------------------------------------------------------
+  # Stream-triggered functions (DynamoDB Streams on APState)
+  # ------------------------------------------------------------------
+  LoadBalancerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: CampusNetSim-LoadBalancer
+      CodeUri: ../backend/lambdas/load_balancer/
+      Timeout: 30
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MigrationsTable
+      Events:
+        APStateStream:
+          Type: DynamoDB
+          Properties:
+            Stream: !GetAtt APStateTable.StreamArn
+            StartingPosition: LATEST
+            BatchSize: 100
+
+  HistoryWriterFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: CampusNetSim-HistoryWriter
+      CodeUri: ../backend/lambdas/history_writer/
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref APHistoryTable
+      Events:
+        APStateStream:
+          Type: DynamoDB
+          Properties:
+            Stream: !GetAtt APStateTable.StreamArn
+            StartingPosition: LATEST
+            BatchSize: 100
+
+  # ------------------------------------------------------------------
+  # Synthetic traffic (deployed without a trigger; invoke manually or
+  # add a schedule)
+  # ------------------------------------------------------------------
+  TrafficGeneratorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: CampusNetSim-TrafficGenerator
+      CodeUri: ../backend/lambdas/traffic_generator/
+      Timeout: 30
+
+Outputs:
+  ApiBaseUrl:
+    Description: Base URL of the CampusNetSim HTTP API
+    Value: !Sub https://${CampusNetSimApi}.execute-api.${AWS::Region}.amazonaws.com

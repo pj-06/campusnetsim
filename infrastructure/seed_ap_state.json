@@ -1,0 +1,6 @@
+[
+  {"ap_id": "AP01", "ap_name": "AP01", "building": "academic_block", "capacity": 3, "connected_count": 0, "utilization_pct": 0, "status": "NORMAL"},
+  {"ap_id": "AP02", "ap_name": "AP02", "building": "hostel", "capacity": 1, "connected_count": 0, "utilization_pct": 0, "status": "NORMAL"},
+  {"ap_id": "AP03", "ap_name": "AP03", "building": "library", "capacity": 3, "connected_count": 0, "utilization_pct": 0, "status": "NORMAL"},
+  {"ap_id": "AP04", "ap_name": "AP04", "building": "academic_block", "capacity": 1, "connected_count": 0, "utilization_pct": 0, "status": "NORMAL"}
+]

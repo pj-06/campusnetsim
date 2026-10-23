@@ -45,9 +45,6 @@ def lambda_handler(event, context):
         "statusCode": 200,
         "headers": {
             "Content-Type": "application/json",
-            # Dashboard runs in a browser and calls this directly (unlike
-            # POST /events, which the simulator calls server-to-server) --
-            # needs CORS or every browser fetch() to this endpoint fails.
             "Access-Control-Allow-Origin": "*",
         },
         "body": json.dumps({"aps": items}),

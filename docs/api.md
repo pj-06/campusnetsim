@@ -1,207 +1,148 @@
 # CampusNetSim API
 
-Live backend for Phase 2 -- deployed on AWS (Lambda + DynamoDB + API Gateway,
-region `ap-south-1`). This is what the dashboard (Phase 5) talks to; you
-should not need to touch DynamoDB or Lambda directly.
+HTTP API (Amazon API Gateway) in front of the CampusNetSim Lambda functions,
+region `ap-south-1`.
 
 **Base URL:** `https://0iczavlx88.execute-api.ap-south-1.amazonaws.com`
 
-No authentication. `GET /aps` has CORS enabled (`Access-Control-Allow-Origin: *`)
-so it's safe to call directly from browser JS. `POST /events` does not have
-CORS configured -- it's meant to be called by the simulator/backend, not
-from browser code.
+All responses are JSON and carry `Access-Control-Allow-Origin: *`, so the
+dashboard and the phone check-in page call the API directly from the browser.
+There is no authentication yet (see "Known limitations").
+
+AP status values: `NORMAL` (< 70 %), `BUSY` (70 to < 90 %), `HIGH_LOAD`
+(90 to < 100 %), `CONGESTED` (>= 100 %).
 
 ---
 
-## GET /aps
+## GET /aps  (CampusNetSim-StatusReader)
 
-Returns the current live state of all 8 APs, sorted by `ap_id`. **This is
-the endpoint the dashboard should poll** (e.g. every few seconds) to render
-the live status grid.
-
-Request: no body, no params.
-
-```
-curl https://0iczavlx88.execute-api.ap-south-1.amazonaws.com/aps
-```
-
-Response `200`:
+Returns the live state of every AP, sorted by `ap_id`.
 
 ```json
 {
   "aps": [
     {
       "ap_id": "AP01",
+      "ap_name": "AP01",
       "building": "academic_block",
-      "capacity": 50,
+      "capacity": 3,
       "connected_count": 0,
       "utilization_pct": 0,
       "status": "NORMAL",
-      "timestamp": "2026-08-31T19:45:32.434279+00:00",
-      "event_id": null,
-      "device_id": null,
-      "recommendation": null
+      "timestamp": "2026-10-20T17:04:54.384722+00:00"
     }
   ]
 }
 ```
 
-(all 8 AP items come back in one array, same shape as above)
+## POST /events  (CampusNetSim-EventProcessor)
 
----
+Records one device CONNECT or DISCONNECT at an AP and returns the updated AP
+record. Capacity, building and name are read from `CampusNetSim_APState` on
+every call, so a capacity change through `PUT /aps/{ap_id}/config` takes effect
+immediately.
 
-## POST /events
+Request body:
 
-Records a single device CONNECT/DISCONNECT event at an AP. Updates that
-AP's live state in DynamoDB and returns the full updated record. This is
-what the traffic simulator calls for every event it generates; the
-dashboard does not need to call this directly.
+| field | type | required | notes |
+|---|---|---|---|
+| `device_id` | string | yes | any device identifier |
+| `ap_id` | string | yes | must exist in `CampusNetSim_APState` |
+| `event_type` | string | yes | `CONNECT` or `DISCONNECT` (case-insensitive) |
+| `timestamp` | string | no | ISO 8601; server time is used if omitted |
 
-Request body (JSON):
+Responses:
 
-| field        | type   | required | notes                                              |
-|--------------|--------|----------|-----------------------------------------------------|
-| `device_id`  | string | yes      | any identifier for the device                       |
-| `ap_id`      | string | yes      | one of `AP01`..`AP08` (see campus layout below)      |
-| `event_type` | string | yes      | `"CONNECT"` or `"DISCONNECT"`                        |
-| `timestamp`  | string | no       | ISO 8601; server fills in current UTC time if omitted |
-| `event_id`   | string | no       | any identifier for the event                         |
+- `200` updated record (`connected_count`, `capacity`, `utilization_pct`,
+  `status`, and `recommendation` when the AP is CONGESTED)
+- `400` missing or invalid fields, or unknown `ap_id`
+- `409` the AP is already at capacity (CONNECT rejected), or the AP state
+  changed concurrently (conditional write failed; retry the event)
 
+## PUT /aps/{ap_id}/config  (UpdateAPConfig)
+
+Updates an AP's configuration without touching its live counters.
+
+```json
+{ "capacity": 4 }
 ```
-curl -X POST https://0iczavlx88.execute-api.ap-south-1.amazonaws.com/events \
-  -H "Content-Type: application/json" \
-  -d '{"device_id": "device-42", "ap_id": "AP03", "event_type": "CONNECT"}'
+
+Allowed fields: `capacity` (integer 1 to 1000), `building`, `ap_name`.
+
+- `200` `{ "message": "AP configuration updated", "ap_id": "...", "updated": {...} }`
+  (utilization is recalculated when capacity changes)
+- `400` invalid or unsupported field
+- `404` AP not found
+- `409` capacity lower than the number of connected devices
+
+## GET /aps/{ap_id}/history  (CampusNetSim-HistoryReader)
+
+Up to 200 readings for one AP, oldest first. Readings expire after 24 hours
+(DynamoDB TTL on `expires_at`).
+
+```json
+{ "ap_id": "AP03", "history": [ { "timestamp": "...", "utilization_pct": 33.33, "...": "..." } ] }
 ```
 
-Response `200`:
+## GET /migrations  (CampusNetSim-MigrationReader)
+
+The 50 most recent load-balancing actions, newest first.
 
 ```json
 {
-  "ap_id": "AP03",
-  "timestamp": "2026-08-31T19:50:42.132284+00:00",
-  "event_id": null,
-  "device_id": "device-42",
-  "building": "academic_block",
-  "connected_count": 12,
-  "capacity": 75,
-  "utilization_pct": 16.0,
-  "status": "NORMAL",
-  "recommendation": null
-}
-```
-
-`status` is one of `NORMAL` (<70%), `BUSY` (<90%), `HIGH_LOAD` (<100%),
-`CONGESTED` (>=100%). `recommendation` is populated only when `status` is
-`CONGESTED`, and looks like:
-
-```json
-{
-  "recommended_ap_id": "AP04",
-  "building": "hostel",
-  "available_capacity": 23,
-  "projected_utilization_pct": 78.0
-}
-```
-
-Error responses (all `400`):
-
-```json
-{"error": "Missing field: 'device_id'"}
-{"error": "Unknown ap_id: AP99"}
-{"error": "Unknown event_type: PING"}
-```
-
----
-
-## GET /aps/{ap_id}/history
-
-Returns recent traffic readings for one AP, oldest first -- what the
-dashboard's trend chart is built from. Backed by a separate
-`CampusNetSim_APHistory` table, populated automatically off a DynamoDB
-Stream on `CampusNetSim_APState` (see `lambda/history_writer`) --
-event_processor itself doesn't need to know this table exists. Readings
-older than 24h are dropped automatically (DynamoDB TTL), so don't
-expect data from before that window.
-
-Request: no body. `ap_id` is a path parameter (`AP01`..`AP08`).
-
-```
-curl https://0iczavlx88.execute-api.ap-south-1.amazonaws.com/aps/AP03/history
-```
-
-Response `200`:
-
-```json
-{
-  "ap_id": "AP03",
-  "history": [
+  "migrations": [
     {
-      "ap_id": "AP03",
-      "timestamp": "2026-09-18T07:22:47.115762+00:00",
-      "building": "academic_block",
-      "connected_count": 1,
-      "capacity": 75,
-      "utilization_pct": 1.33,
-      "status": "NORMAL"
+      "source_ap_id": "AP04",
+      "target_ap_id": "AP03",
+      "devices_moved": 1,
+      "source_utilization_before": 100,
+      "source_utilization_after": 0,
+      "target_utilization_before": 0,
+      "target_utilization_after": 33.33,
+      "reason": "AP04 at 100% (>= 85% threshold)",
+      "status": "success",
+      "timestamp": "2026-10-20T17:14:38.947803+00:00"
     }
   ]
 }
 ```
 
-At most 200 points are returned per call. CORS is enabled (same as
-`GET /aps`) -- safe to call directly from browser JS.
+## GET /devices and POST /devices  (CampusNetSim-DeviceRegistry)
 
----
+`GET` returns the check-in roster:
 
-## Campus layout (for reference)
-
-| Building         | APs                         |
-|-------------------|------------------------------|
-| `academic_block`  | AP01 (50), AP02 (50), AP03 (75) |
-| `hostel`           | AP04 (100), AP05 (100), AP06 (75) |
-| `library`          | AP07 (75), AP08 (50)          |
-
-(numbers in parens are each AP's device capacity)
-
----
-
-## Resetting demo data
-
-To reset all 8 APs back to zero traffic (e.g. before a demo run), from the
-repo root with AWS credentials configured:
-
+```json
+{ "devices": [ { "device_id": "...", "nickname": "...", "ap_id": "AP02", "status": "CONNECTED", "joined_at": "...", "last_seen": "..." } ] }
 ```
-python -m infrastructure.seed_dynamodb
+
+`POST` body: `{ "device_id": "...", "event_type": "JOIN", "ap_id": "AP02", "nickname": "..." }`
+or `{ "device_id": "...", "event_type": "LEAVE" }`.
+
+## POST /admin/reset  (CampusNetSim-AdminReset)
+
+Zeroes every AP, deletes all rows in `CampusNetSim_Migrations` and
+`CampusNetSim_APHistory`, and marks every connected device as disconnected.
+**Irreversible.** Any other method returns `405`.
+
+```json
+{ "aps_reset": 4, "migrations_deleted": 1, "history_deleted": 12, "devices_disconnected": 0 }
 ```
 
 ---
 
-## Deploying traffic history (one-time)
+## Stream-driven functions (no route)
 
-`GET /aps/{ap_id}/history` doesn't exist until this is set up. From the
-repo root, with AWS credentials configured:
+- **CampusNetSim-LoadBalancer**: consumes the `CampusNetSim_APState` stream.
+  When an AP reaches 85 % or more, it picks the AP with the most free capacity
+  and moves up to 5 devices (enough to bring the source down to about 80 %) by
+  posting DISCONNECT/CONNECT events, updates the roster for real phones, and
+  writes a record to `CampusNetSim_Migrations`.
+- **CampusNetSim-HistoryWriter**: consumes the same stream and appends each
+  new AP state to `CampusNetSim_APHistory`.
 
-```
-python -m infrastructure.setup_history_table
-```
+## Known limitations
 
-This creates `CampusNetSim_APHistory` (with TTL) and turns on a stream on
-`CampusNetSim_APState`, printing the stream's ARN. Then, in the AWS
-Console:
-
-1. Create a Lambda function `history_writer` from
-   `lambda/history_writer/lambda_function.py`. Add a DynamoDB trigger
-   pointing at `CampusNetSim_APState`'s stream (the ARN the script
-   printed). Its execution role needs `dynamodb:PutItem` on
-   `CampusNetSim_APHistory` plus the standard DynamoDB Streams read
-   permissions (`AWSLambdaDynamoDBExecutionRole` covers both).
-2. Create a Lambda function `history_reader` from
-   `lambda/history_reader/lambda_function.py`. Its execution role needs
-   `dynamodb:Query` on `CampusNetSim_APHistory`.
-3. In API Gateway, add a `GET /aps/{ap_id}/history` route, Lambda-proxy
-   integration to `history_reader`, with CORS enabled (same as
-   `GET /aps`). Deploy the API stage.
-
-Nothing here touches `event_processor` -- history is populated by
-reading the state table's stream, not by changing what event_processor
-writes.
+- No authentication or authorization on any route, including
+  `/admin/reset` and `/aps/{ap_id}/config`.
+- `CampusNetSim-TrafficGenerator` has no trigger; invoke it manually or attach
+  an EventBridge schedule.

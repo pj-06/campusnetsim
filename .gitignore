@@ -23,3 +23,6 @@ Thumbs.db
 # Node
 node_modules/
 dashboard/dist/
+# Build artifacts
+dashboard/*.zip
+.pytest_cache/

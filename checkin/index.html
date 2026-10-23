@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+<title>CampusNetSim — Check In</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --card: #1e293b;
+    --card-2: #16213a;
+    --border: #2d3b52;
+    --text: #e2e8f0;
+    --text-dim: #94a3b8;
+    --accent: #38bdf8;
+    --green: #34d399;
+    --yellow: #fbbf24;
+    --orange: #fb923c;
+    --red: #f87171;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  .wrap {
+    max-width: 480px;
+    margin: 0 auto;
+    padding: 16px 16px 90px;
+  }
+  header {
+    text-align: center;
+    padding: 20px 0 12px;
+  }
+  header h1 {
+    font-size: 20px;
+    margin: 0 0 4px;
+    letter-spacing: 0.3px;
+  }
+  header p {
+    margin: 0;
+    color: var(--text-dim);
+    font-size: 13px;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 16px;
+    margin-bottom: 14px;
+  }
+  .card h2 {
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--text-dim);
+    margin: 0 0 12px;
+  }
+  label {
+    display: block;
+    font-size: 13px;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+  }
+  input[type="text"] {
+    width: 100%;
+    padding: 12px 14px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--card-2);
+    color: var(--text);
+    font-size: 15px;
+    margin-bottom: 12px;
+  }
+  input[type="text"]:focus { outline: 2px solid var(--accent); }
+  .ap-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--card-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 15px;
+    font-weight: 600;
+    margin-bottom: 12px;
+  }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--text-dim); flex-shrink: 0; }
+  .dot.normal { background: var(--green); }
+  .dot.busy { background: var(--yellow); }
+  .dot.high_load { background: var(--orange); }
+  .dot.congested { background: var(--red); }
+  button {
+    width: 100%;
+    padding: 14px;
+    border-radius: 10px;
+    border: none;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.15s;
+  }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-join { background: var(--accent); color: #04202e; }
+  .btn-leave { background: var(--card-2); color: var(--red); border: 1px solid var(--red); }
+  .status-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 6px;
+  }
+  .status-row .label { color: var(--text-dim); font-size: 13px; }
+  .status-row .value { font-size: 14px; font-weight: 600; }
+  .bar-track {
+    height: 8px;
+    border-radius: 4px;
+    background: var(--card-2);
+    overflow: hidden;
+    margin: 8px 0 4px;
+  }
+  .bar-fill { height: 100%; border-radius: 4px; background: var(--green); transition: width 0.4s ease; }
+  .bar-fill.busy { background: var(--yellow); }
+  .bar-fill.high_load { background: var(--orange); }
+  .bar-fill.congested { background: var(--red); }
+  .note {
+    font-size: 12px;
+    color: var(--text-dim);
+    line-height: 1.5;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px dashed var(--border);
+  }
+  #joinedPanel { display: none; }
+  #errorBanner {
+    display: none;
+    background: #3f1d1d;
+    border: 1px solid var(--red);
+    color: #fecaca;
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: 13px;
+    margin-bottom: 14px;
+  }
+  #redirectBanner {
+    display: none;
+    background: #052e3f;
+    border: 1px solid var(--accent);
+    color: #bae6fd;
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: 13px;
+    margin-bottom: 14px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>📶 CampusNetSim Check-In</h1>
+    <p>Scan-and-join demo for the campus Wi-Fi simulator</p>
+  </header>
+
+  <div id="errorBanner"></div>
+  <div id="redirectBanner"></div>
+
+  <!-- AP identity -->
+  <div class="card" id="apCard">
+    <h2>Access Point</h2>
+    <div id="apBadgeWrap"></div>
+  </div>
+
+  <!-- Pre-join: nickname entry -->
+  <div class="card" id="joinCard">
+    <h2>Join this AP</h2>
+    <label for="nicknameInput">Your name (shown to others)</label>
+    <input type="text" id="nicknameInput" placeholder="e.g. Nakul" maxlength="30" />
+    <button class="btn-join" id="joinBtn">Join AP</button>
+    <div class="note">
+      Joining here only tells the simulator you're associated with this AP for the
+      demo — your phone stays on whatever Wi-Fi or mobile data it already has the
+      whole time.
+    </div>
+  </div>
+
+  <!-- Post-join panels -->
+  <div id="joinedPanel">
+    <div class="card">
+      <h2>Live AP status</h2>
+      <div class="status-row">
+        <span class="label">Connected devices</span>
+        <span class="value" id="countValue">—</span>
+      </div>
+      <div class="bar-track"><div class="bar-fill" id="utilBar" style="width:0%"></div></div>
+      <div class="status-row">
+        <span class="label">Utilization</span>
+        <span class="value" id="utilValue">—</span>
+      </div>
+      <button class="btn-leave" id="leaveBtn" style="margin-top:10px;">Leave AP</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---- Config -------------------------------------------------------
+  const API_BASE = "https://0iczavlx88.execute-api.ap-south-1.amazonaws.com";
+  const AP_META = {
+    AP01: { building: "academic_block", capacity: 8 },
+    AP02: { building: "hostel", capacity: 8 },
+    AP03: { building: "library", capacity: 6 },
+    AP04: { building: "academic_block", capacity: 6 },
+  };
+  const STATUS_LABEL = {
+    NORMAL: "Normal",
+    BUSY: "Busy",
+    HIGH_LOAD: "High load",
+    CONGESTED: "Congested",
+  };
+  const AP_POLL_MS = 5000;
+
+  // ---- State ----------------------------------------------------------
+  const params = new URLSearchParams(window.location.search);
+  // apId is the AP we currently display/poll. It starts from the QR
+  // link but can change at runtime if the load balancer migrates this
+  // device to a different AP (see checkForRedirect below).
+  let apId = (params.get("ap") || "").toUpperCase();
+  let deviceId = localStorage.getItem("cns_device_id");
+  if (!deviceId) {
+    deviceId = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : ("dev-" + Math.random().toString(36).slice(2) + Date.now());
+    localStorage.setItem("cns_device_id", deviceId);
+  }
+  let nickname = localStorage.getItem("cns_nickname") || "";
+  let joined = localStorage.getItem("cns_joined_ap") === apId;
+  let apPollTimer = null;
+
+  // ---- DOM refs -------------------------------------------------------
+  const errorBanner = document.getElementById("errorBanner");
+  const redirectBanner = document.getElementById("redirectBanner");
+  const apBadgeWrap = document.getElementById("apBadgeWrap");
+  const joinCard = document.getElementById("joinCard");
+  const joinedPanel = document.getElementById("joinedPanel");
+  const nicknameInput = document.getElementById("nicknameInput");
+  const joinBtn = document.getElementById("joinBtn");
+  const leaveBtn = document.getElementById("leaveBtn");
+  const countValue = document.getElementById("countValue");
+  const utilBar = document.getElementById("utilBar");
+  const utilValue = document.getElementById("utilValue");
+
+  function showError(msg) {
+    errorBanner.textContent = msg;
+    errorBanner.style.display = "block";
+  }
+
+  function showRedirectBanner(fromAp, toAp) {
+    const fromMeta = AP_META[fromAp];
+    const toMeta = AP_META[toAp];
+    const fromLabel = fromMeta ? fromMeta.building.replace("_", " ") : fromAp;
+    const toLabel = toMeta ? toMeta.building.replace("_", " ") : toAp;
+    redirectBanner.textContent =
+      "You were moved from " + fromAp + " (" + fromLabel + ") to " + toAp +
+      " (" + toLabel + ") — the load balancer redirected you to ease congestion.";
+    redirectBanner.style.display = "block";
+  }
+
+  function showDisconnectBanner() {
+    const meta = AP_META[apId];
+    const label = meta ? meta.building.replace("_", " ") : apId;
+    redirectBanner.textContent =
+      "You were disconnected from " + apId + " (" + label + ") — the simulation was reset. Join again to reconnect.";
+    redirectBanner.style.display = "block";
+  }
+
+  // ---- Validate ap param -----------------------------------------------
+  if (!apId || !AP_META[apId]) {
+    showError(
+      "No valid access point specified in the link (expected ?ap=AP01..AP04). " +
+      "Ask whoever generated your QR code to check it, or add ?ap=AP01 to the URL."
+    );
+    joinCard.style.display = "none";
+  } else {
+    nicknameInput.value = nickname;
+    renderApBadge(null);
+  }
+
+  function renderApBadge(apData) {
+    const meta = AP_META[apId];
+    const status = apData ? apData.status : null;
+    const dotClass = status ? status.toLowerCase() : "";
+    const buildingLabel = meta.building.replace("_", " ");
+    apBadgeWrap.innerHTML =
+      '<div class="ap-badge"><span class="dot ' + dotClass + '"></span>' +
+      apId + " — " + buildingLabel + "</div>";
+  }
+
+  // ---- API helpers ------------------------------------------------------
+  async function postJson(path, body) {
+    const res = await fetch(API_BASE + path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(path + " failed: " + res.status);
+    return res.json();
+  }
+  async function getJson(path) {
+    const res = await fetch(API_BASE + path);
+    if (!res.ok) throw new Error(path + " failed: " + res.status);
+    return res.json();
+  }
+
+  // ---- Join / Leave -------------------------------------------------------
+  async function doJoin() {
+    const nick = (nicknameInput.value || "").trim().slice(0, 30) || "Guest";
+    nickname = nick;
+    localStorage.setItem("cns_nickname", nick);
+    joinBtn.disabled = true;
+    joinBtn.textContent = "Joining…";
+    try {
+      await postJson("/events", {
+        device_id: deviceId,
+        ap_id: apId,
+        event_type: "CONNECT",
+        timestamp: new Date().toISOString(),
+        event_id: (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()),
+      });
+      await postJson("/devices", {
+        device_id: deviceId,
+        event_type: "JOIN",
+        ap_id: apId,
+        nickname: nick,
+      });
+      joined = true;
+      localStorage.setItem("cns_joined_ap", apId);
+      enterJoinedState();
+    } catch (e) {
+      showError("Couldn't join right now (" + e.message + "). Check your connection and try again.");
+    } finally {
+      joinBtn.disabled = false;
+      joinBtn.textContent = "Join AP";
+    }
+  }
+
+  async function doLeave() {
+    leaveBtn.disabled = true;
+    leaveBtn.textContent = "Leaving…";
+    try {
+      await postJson("/events", {
+        device_id: deviceId,
+        ap_id: apId,
+        event_type: "DISCONNECT",
+        timestamp: new Date().toISOString(),
+        event_id: (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()),
+      });
+      await postJson("/devices", { device_id: deviceId, event_type: "LEAVE" });
+    } catch (e) {
+      // Even if the network call fails, let the user leave locally —
+      // don't trap them in a "connected" UI state they can't escape.
+    }
+    joined = false;
+    localStorage.removeItem("cns_joined_ap");
+    redirectBanner.style.display = "none";
+    exitJoinedState();
+    leaveBtn.disabled = false;
+    leaveBtn.textContent = "Leave AP";
+  }
+
+  function enterJoinedState() {
+    joinCard.style.display = "none";
+    joinedPanel.style.display = "block";
+    refreshApStatus();
+    apPollTimer = setInterval(pollAp, AP_POLL_MS);
+  }
+
+  function exitJoinedState() {
+    joinedPanel.style.display = "none";
+    joinCard.style.display = "block";
+    if (apPollTimer) clearInterval(apPollTimer);
+  }
+
+  // A forced disconnect (e.g. the dashboard's "Reset simulation" button)
+  // clears our row server-side without us clicking Leave. Notice that on
+  // the next poll and drop back to the join screen with an explanation.
+  function handleForcedDisconnect() {
+    joined = false;
+    localStorage.removeItem("cns_joined_ap");
+    showDisconnectBanner();
+    exitJoinedState();
+  }
+
+  // ---- AP status polling -------------------------------------------------
+  async function pollAp() {
+    await checkForRedirect();
+    if (!joined) return;
+    await refreshApStatus();
+  }
+
+  // If the load balancer has migrated this device to a different AP,
+  // the Devices table will show a new ap_id for our device_id. Notice
+  // that and switch what we display/poll to match. Also notice if our
+  // device has been force-disconnected (e.g. by a simulation reset).
+  async function checkForRedirect() {
+    try {
+      const data = await getJson("/devices");
+      const list = data.devices || data.items || data || [];
+      const mine = Array.isArray(list) ? list.find((d) => d.device_id === deviceId) : null;
+      if (mine && mine.status && mine.status !== "CONNECTED") {
+        handleForcedDisconnect();
+        return;
+      }
+      if (mine && mine.ap_id && mine.ap_id !== apId && AP_META[mine.ap_id]) {
+        const fromAp = apId;
+        apId = mine.ap_id;
+        localStorage.setItem("cns_joined_ap", apId);
+        showRedirectBanner(fromAp, apId);
+        renderApBadge(null);
+      }
+    } catch (e) {
+      // Silent — a transient poll failure shouldn't interrupt the UI.
+    }
+  }
+
+  async function refreshApStatus() {
+    try {
+      const data = await getJson("/aps");
+      const list = data.aps || data.items || data || [];
+      const mine = Array.isArray(list) ? list.find((a) => a.ap_id === apId) : null;
+      if (mine) {
+        renderApBadge(mine);
+        const cap = mine.capacity || AP_META[apId].capacity;
+        const count = mine.connected_count != null ? mine.connected_count : "—";
+        countValue.textContent = count + " / " + cap;
+        const pct = mine.utilization_pct != null ? mine.utilization_pct : 0;
+        utilValue.textContent = pct + "% · " + (STATUS_LABEL[mine.status] || mine.status || "—");
+        const cls = (mine.status || "normal").toLowerCase();
+        utilBar.style.width = Math.min(pct, 100) + "%";
+        utilBar.className = "bar-fill " + cls;
+      }
+    } catch (e) {
+      // Silent — a transient poll failure shouldn't interrupt the UI.
+    }
+  }
+
+  // ---- Wire up events -----------------------------------------------------
+  joinBtn.addEventListener("click", doJoin);
+  leaveBtn.addEventListener("click", doLeave);
+
+  // ---- Resume a previous session on this AP, if any ------------------------
+  if (apId && AP_META[apId] && joined) {
+    enterJoinedState();
+  }
+})();
+</script>
+</body>
+</html>
