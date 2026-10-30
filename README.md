@@ -39,7 +39,6 @@ backend/
     load_balancer/        APState stream        (CampusNetSim-LoadBalancer)
     history_writer/       APState stream        (CampusNetSim-HistoryWriter)
     traffic_generator/    manual invocation     (CampusNetSim-TrafficGenerator)
-  legacy/chat/          Retired chat function (not used by the final system)
 checkin/index.html      Phone check-in page served from S3
 dashboard/              React + Vite dashboard (deployed to AWS Amplify)
 infrastructure/

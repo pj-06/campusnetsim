@@ -22,10 +22,6 @@ memory and 512 MB ephemeral storage. Source code: `backend/lambdas/<folder>/`.
 | CampusNetSim-HistoryWriter | `history_writer` | python3.13 | 3 s | DynamoDB Stream on `CampusNetSim_APState` (batch 100, LATEST) |
 | CampusNetSim-TrafficGenerator | `traffic_generator` | python3.13 | 30 s | none (manual invocation) |
 
-`backend/legacy/chat/` holds `CampusNetSim-Chat` (route `/chat`, table
-`CampusNetSim_Messages`). The dashboard no longer uses it. It is kept for
-reference only and is not part of the final system.
-
 ## API Gateway
 
 - HTTP API `CampusNetSim-API`, base URL
@@ -44,7 +40,7 @@ reference only and is not part of the final system.
 
 ## Static hosting
 
-- Phone check-in page: S3 bucket `campusnetsim-checkin-757786127039`, object
+- Phone check-in page: S3 bucket `campusnetsim-checkin-<account-id>`, object
   `index.html` (source: `checkin/index.html`). Each AP's QR code opens
   `index.html?ap=AP0n`.
 - Dashboard: AWS Amplify Hosting, manual deployment of the Vite `dist/` build
